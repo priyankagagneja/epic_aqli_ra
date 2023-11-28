@@ -1,0 +1,286 @@
+---
+title: "AQLI Test Packet - EPIC"
+subtitle: "1. Data Management, Cleaning and Analysis Section"
+author: "Priyanka Gagneja"
+date: "2023-11-24"
+output: word_document
+---
+
+## AQLI @ EPIC {.tabset}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+#### Initial Set up
+
+```{r}
+library(magrittr)
+library(ggplot2)
+library(ggtext)
+library(patchwork)  # for modifying plot output placements
+library(easystats)  # group of pkgs for regression modelling and diagnostiics
+library(plm)        # for panel data
+```
+
+### 1.1 Data Cleaning
+
+```{r, class.source = 'fold-show'}
+# (1) Load the data
+Africa_gdp <- haven::read_dta("Inputs/task1/Africa_gdp.dta")
+Africa_countries_codes <- readxl::read_excel("Inputs/task1/Africa_countries_codes.xlsx")
+
+Africa_gdp <- Africa_gdp %>% 
+  
+  # (2) Bring in the variable WB2code. Also assign a numeric code using variable name NumCode to each country, with each number reflecting the rank of the country in alphabetical order.
+  dplyr::left_join(Africa_countries_codes %>% 
+                     dplyr::arrange(CountryName) %>% 
+                     dplyr::mutate(NumCode = rank(CountryName)) %>% 
+                     dplyr::select(-CountryName), 
+                   by = "CountryCode") %>% 
+  
+  # (3) Create LName cleaned version of LongName
+  dplyr::mutate(LName = gsub(paste(c("of","the"), collapse = "|"), "", LongName)) 
+  
+  # (4)(a) Generate a table with averages over time of gdp_pc_k and gdp_pc_c for every country. 
+average_gdp <- Africa_gdp %>% 
+  dplyr::group_by(CountryCode) %>% 
+  dplyr::summarise(gdp_pc_k = mean(gdp_pc_k, na.rm = TRUE),
+                   gdp_pc_c = mean(gdp_pc_c, na.rm = TRUE)) %>% 
+  dplyr::ungroup()
+  
+  # (4)(b) Export the table in publishable format as an excel file and name it “average_gdp.xlsx” (or “.csv”)
+  write.csv(average_gdp, "Outputs/task1/average_gdp.csv")
+
+  # (5)(a) Load the “WDI_Agriculture_VA.csv”
+  WDI_Agriculture_VA <- read.csv("Inputs/task1/WDI_Agricultural_VA.csv") %>% 
+    
+  # (5)(b) Change the format of data from wide to date wise long format, 
+  #     with Year on one column and Agriculture constant values on the other
+    dplyr::select(CountryCode = Country.Code, contains("X"), -X2.alpha.code) %>% 
+    tidyr::pivot_longer(cols = contains("X"), names_to = "Year", values_to = "Agri_Const") %>% 
+    dplyr::mutate(Year = sub("X","",Year))
+
+  # (6)(a) Merge the WDI_Agriculture_VA dataset with the Africa_gdp dataset by Year and Country
+  Africa_merged <- WDI_Agriculture_VA %>% 
+    dplyr::right_join(Africa_gdp %>% 
+                        dplyr::mutate(Year = as.character(year)) %>% 
+                        dplyr::select(-year), 
+                   by = c("CountryCode", "Year")) 
+  
+  # (6)(b) Export the dataset and name it “Africa_merged.xlsx” (or .csv)
+    write.csv(Africa_merged, "Outputs/task1/Africa_merged.csv")
+
+  
+  # (7)(a) Generate a separate timeseries dataset which depicts the average constant and current GDP per capita (gdp_pc_k and gdp_pc_c) of Africa from 1960 to 2013. Export the table in excel format and name it “Africa_gdp_timeseries.xlsx” (or .csv)
+  
+  Africa_gdp_timeseries <- Africa_gdp %>% 
+    dplyr::group_by(year) %>% 
+    dplyr::summarise(gdp_pc_k = mean(gdp_pc_k, na.rm = TRUE),
+                     gdp_pc_c = mean(gdp_pc_c, na.rm = TRUE)) %>% 
+    dplyr::ungroup()
+  
+  # (7)(b) Export the table in publishable format as an excel file and name it “average_gdp.xlsx” (or “.csv”)
+  write.csv(Africa_gdp_timeseries, "Outputs/task1/Africa_gdp_timeseries.csv")
+  
+  
+  
+  # (8)(a) Generate a separate data set of the following variables average by country: i) GDP per capita (current), ii) GDPpercapita(constant), iii) Agriculture value (constant)
+    Africa_country_average <- Africa_merged %>% 
+      dplyr::group_by(Region, CountryName) %>% 
+      dplyr::summarise(gdp_pc_k   = mean(gdp_pc_k, na.rm = TRUE),
+                       gdp_pc_c   = mean(gdp_pc_c, na.rm = TRUE),
+                       Agri_Const = mean(Agri_Const, na.rm = TRUE)) %>% 
+      dplyr::ungroup()
+
+  # (8)(b) Save and export the dataset as “Africa_country_average.xlsx” (or .csv). Make sure to retain the region variable.
+  write.csv(Africa_country_average %>% 
+      dplyr::rename(Country                        = CountryName,
+                    "GDP per capita (current)"     = gdp_pc_k,
+                    "GDP per capita (constant)"    = gdp_pc_c,
+                    "Agriculture value (constant)" = Agri_Const), 
+      "Outputs/task1/Africa_country_average.csv")  
+
+```
+
+### 1.2 Data Exploration
+
+1. Using the Africa_gdp_timeseries dataset, generate line graph of average constant and current GDP per capita against time for Africa. On a particular year, the average GDP per capita seem to increase drastically. On what year does there seem to be a drastic increase? Indicate the year on the plot. Format your graphs so that they are publication quality and save them as .pdf files.    
+
+```{r}
+Africa_gdp_ts <- Africa_gdp_timeseries %>% 
+  tidyr::pivot_longer(cols = c(gdp_pc_k, gdp_pc_c), names_to = "gdp_type", values_to = "GDP")
+
+# avg_ts_plot <- Africa_gdp_timeseries %>% 
+Africa_gdp_ts %>% 
+  ggplot(aes(x = year, y = GDP, colour = gdp_type)) + 
+  geom_line() + 
+  # facet_wrap(~gdp_type) + 
+  geom_text(aes(label = year), data = Africa_gdp_ts[which.max(Africa_gdp_ts$GDP),], hjust = 1.2, vjust = 0.5) +
+  # ggtext::geom_textbox(aes(label = paste0("<span style='font-size:32pt'><br>", Africa_gdp_timeseries[which.max(Africa_gdp_timeseries$GDP),], "<br></span>")), vjust = 0.45, fill = NA, box.colour = NA, family = "Cabin", size = 7, fontface = "bold") + 
+  scale_x_continuous(n.breaks = 10) + 
+  scale_y_continuous(n.breaks = 6) + 
+  labs(title = "GDP per Capita for Africa over time") + 
+  theme_light()
+ 
+# avg_ts_plot
+ggsave("Outputs/task1/plot_01_avg_gdp_ts.pdf")
+
+# NOTES for improvement: 
+# there are better ways of doing the annotation one is given here, using ggpmisc
+# https://stackoverflow.com/questions/51697870/how-to-annotate-line-plot-with-arrow-and-maximum-value
+# Another solution is available using ggtext package
+```
+
+2. Using the Africa_country_average dataset, create side-by-side bar graphs of constant and current GDP per capita for all countries in the Middle East and North Africa Region. Format your graphs so that they are publication quality and save them as .pdf files.    
+
+```{r}
+Africa_country_average %>% 
+  dplyr::filter(Region == "Middle East & North Africa") %>% 
+  dplyr::select(-Agri_Const, -Region ) %>% 
+  tidyr::pivot_longer(cols = c(gdp_pc_k, gdp_pc_c), names_to = "gdp_type", values_to = "GDP") %>% 
+  dplyr::mutate(gdp_type    = dplyr::if_else(gdp_type == "gdp_pc_c", "GDP Per Capita Current", "GDP Per Capita Constant")) %>% 
+  dplyr::arrange(GDP) %>% 
+  ggplot(aes(x = CountryName, y = GDP)) + 
+  geom_col() + 
+  facet_grid(~gdp_type) + 
+  coord_flip() + 
+  theme_light()
+
+# NOTES for improvement 
+# Ideally I would also arrange the plots by descending order of GDP in each plot.
+ggsave("Outputs/task1/plot_02_gdp_country.pdf")
+```
+
+
+3. Generate scatter plots for: i) GDP per capita (constant) on Poverty rate(1day) ii) GDP per capita(constant) on Employment ratio. Interpret these graphs and format them as a single pdf file.     
+
+```{r}
+gdp_k_vs_pov_rate <- Africa_gdp %>% 
+  ggplot(aes(x = gdp_pc_k, y = pov_rate_1day)) + 
+  geom_point() + 
+  theme_light()
+
+gdp_k_vs_emp_ratio <- Africa_gdp %>% 
+  ggplot(aes(x = gdp_pc_k, y = emp_ratio)) + 
+  geom_point() + 
+  theme_light()  
+
+gdp_k_vs_pov_rate + gdp_k_vs_emp_ratio
+
+ggsave("Outputs/task1/plot_03_gdp_scatter.pdf")
+```
+
+
+### 1.3 Causal Inference
+
+1. Using the main dataset (Africa_merged), run the following linear regression and create a single table in Excel with the coefficients and main statistics (R2, no. of obs). Name the Excel file “Poverty regression”.
+a. Poverty rate (1 day) on GDP (constant) per capita. Interpret the result. 
+Would you say that the estimated effect is causal in nature? Explain.
+For the above regression, write out a simple econometric model.
+
+```{r}
+model <- lm(gdp_pc_k ~ pov_rate_1day, data = Africa_merged)
+
+# regular model parameters
+parameters::model_parameters(model) %>% 
+  gt::gt()
+
+# saving model as .csv
+parameters::model_parameters(model) %>% 
+  gt::gt() %>% 
+  write.csv("Outputs/task1/Poverty regression.csv")
+
+# library(see)
+# performance::check_model(model).   # supposed  to print diagnostics graphs but isn't working at the moment
+
+# report::report_text(model)
+report::report(model)
+
+```
+
+Simple econometric model: 
+  $$  
+  gdp_pc_k = `r model$coefficients[[1]]` + `r model$coefficients[[2]]`*pov_rate_1day      
+  $$
+
+2. Suppose you estimate the model using OLS and obtain a coefficient of 0.1 with a standard error of 0.02. Interpret this result.     
+
+The coefficient measures the effect the predictor has on the target variable. The coefficient or parameter estimate depicts the slope term in the model is saying that for every 1 unit increase in the predictor, the target variable goes up by 0.1 units.
+
+The coefficient Standard Error measures the average amount that the coefficient estimates vary from the actual average value of our response variable. Ideally we want a lower SE relative to its coefficients. In this example, for every 1 unit increase in the predictor, the value of target variable can vary upto .02 units. The Standard Error can be used to compute an estimate of the expected difference in case we ran the model again and again. In other words, we can say that the required distance for a car to stop can vary by 0.4155128 feet. The Standard Errors can also be used to compute confidence intervals.    
+
+
+
+
+3. The effect of GDP per capita on Poverty is likely non-linear. Explain how you would modify the above model to estimate any potential non-linearities.
+
+```{r}
+Africa_merged %>% 
+  ggplot(aes(x = 1/log(gdp_pc_k), y = pov_rate_1day)) + 
+  geom_point() + 
+  theme_light() 
+```
+
+Reciprocal of log transformation makes the relation nearly linear in this case.     
+
+4. Create a categorical variable with the levels of IncomeGroup, where 1 is poorest and 4 is wealthiest (call it IncGrp). Run the following regressions. Create a single table in Excel with each column showing the coefficients for regressions (a) and (b) and main statistics (R2, no. of obs). Name the Excel file “Income group regressions 1 and 2.xlsx (csv)”. Create another table with the marginal effects of regression (c). Name the Excel file “Income group regression 3”. The models to be run are:
+a. OLS of Employment ratio on dummies for each Income group
+b. OLS of Employment ratio on dummies for each Income group, and an interaction term
+between income groups and constant GDP per capita.
+c. Create a dummy variable identifying the rich countries (those with values of IncGrp = 3 and IncGrp = 4) and zero for the rest (name this variable rich). Run a probit of rich on Employment ratio and total workers (wrks) [you can ignore the time dimension of the dataset so just pool all observations across years].
+
+
+```{r}
+Africa_merged_v2 <- Africa_merged %>% 
+  dplyr::mutate(IncGrp = dplyr::case_when(
+                                  IncomeGroup == "Low income"              ~ 1, 
+                                  IncomeGroup == "Lower middle income"     ~ 2,
+                                  IncomeGroup == "Upper middle income"     ~ 3, 
+                                  IncomeGroup == "High income: nonOECD"    ~ 4,
+                                  TRUE                                     ~ 0),
+                                  rich = dplyr::if_else(IncomeGroup %in% c(3,4),1, 0))
+
+
+# Africa_merged %>% 
+#   modelbased::describe_nonlinear(gdp_pc_c)
+
+# (a)
+ols_model <- lm(data = Africa_merged_v2, formula = emp_ratio ~ IncGrp)
+summary(ols_model)
+
+# (b)
+ols_interaction_model <- lm(data = Africa_merged_v2, formula = emp_ratio ~ IncGrp*gdp_pc_k)
+summary(ols_interaction_model)
+
+# (c)
+probit_model <- glm(formula = rich ~ emp_ratio + wkrs, family = binomial(link = "probit"), data = Africa_merged_v2)
+summary(probit_model)
+
+# saving model as .csv
+parameters::model_parameters(ols_model) %>% 
+  write.csv("Outputs/task1/Income group regressions 1.csv")
+
+parameters::model_parameters(ols_interaction_model) %>% 
+  write.csv("Outputs/task1/Income group regressions 2.csv")
+
+parameters::model_parameters(probit_model) %>% 
+  write.csv("Outputs/task1/Income group regressions 3.csv")
+
+```
+
+
+5. Run a fixed-effects regression of constant GDP per capita on employment ratio with country- specific fixed effects, and create a single table in Excel. Name the Excel file “Fixed effect regression.xlsx (.csv)”.
+
+```{r}
+# Run fixed effects model for the gdp panel data
+fixed_effects_reg_model <- plm(gdp_pc_k ~ emp_ratio, data = Africa_merged, 
+                               index = c("CountryName", "Year"), 
+                               model = "within")  #fixed model
+
+summary(fixed_effects_reg_model)
+
+fixed_effects_df <- fixef(fixed_effects_reg_model)
+write.csv(fixed_effects_df, "Outputs/task1/Fixed effects regression.csv")
+```
+

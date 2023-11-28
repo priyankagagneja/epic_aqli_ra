@@ -1,0 +1,166 @@
+---
+title: "AQLI Test Packet"
+format: html
+editor: visual
+---
+
+## AQLI @ EPIC
+```{r}
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+```{r}
+library(magrittr)
+library(ggplot2)
+library(ggtext)
+library(patchwork)
+```
+
+### 1.1 Data Cleaning
+
+```{r}
+# (1) Load the data
+Africa_gdp <- haven::read_dta("data/Africa_gdp.dta")
+Africa_country_code <- readxl::read_excel("data/Africa_countries_codes.xlsx")
+
+Africa_gdp <- Africa_gdp %>% 
+  
+  # (2)(a) Bring in the variable WB2code
+  dplyr::left_join(Africa_country_code %>% 
+                     dplyr::select(-CountryName), 
+                   by = "CountryCode") %>% 
+  
+  # (2)(b) Assign a numeric code using variable name NumCode to each country, with each number reflecting the rank of the country in alphabetical order.
+  
+  # (3) Create LName cleaned version of LongName
+  dplyr::mutate(LName = gsub(paste(c("of","the"), collapse = "|"), "", LongName)) 
+  
+  # (4)(a) Generate a table with averages over time of gdp_pc_k and gdp_pc_c for every country. 
+average_gdp <- Africa_gdp %>% 
+  # dplyr::select(CountryCode, gdp_pc_k, gdp_pc_c) %>% 
+  dplyr::group_by(CountryCode) %>% 
+  dplyr::summarise(gdp_pc_k = mean(gdp_pc_k, na.rm = TRUE),
+                   gdp_pc_c = mean(gdp_pc_c, na.rm = TRUE)) %>% 
+  dplyr::ungroup()
+  
+  # (4)(b) Export the table in publishable format as an excel file and name it “average_gdp.xlsx” (or “.csv”)
+  write.csv(average_gdp, "average_gdp.csv")
+
+  # (5)(a) Load the “WDI_Agriculture_VA.csv”
+  WDI_Agriculture_VA <- read.csv("data/WDI_Agricultural_VA.csv") %>% 
+    
+  # (5)(b) Change the format of data from wide to date wise long format, 
+  #     with Year on one column and Agriculture constant values on the other
+    dplyr::select(CountryCode = Country.Code, contains("X"), -X2.alpha.code) %>% 
+    tidyr::pivot_longer(cols = contains("X"), names_to = "Year", values_to = "Agri_Const") %>% 
+    dplyr::mutate(Year = sub("X","",Year))
+
+  # (6)(a) Merge the WDI_Agriculture_VA dataset with the Africa_gdp dataset by Year and Country
+  Africa_merged <- WDI_Agriculture_VA %>% 
+    dplyr::right_join(Africa_gdp %>% 
+                        dplyr::mutate(Year = as.character(year)) %>% 
+                        dplyr::select(-year), 
+                   by = c("CountryCode", "Year")) 
+  
+  # (6)(b) Export the table in publishable format as an excel file and name it “average_gdp.xlsx” (or “.csv”)
+      (Africa_merged, "Africa_merged.xlsx")
+  
+  
+  # (7)(a) Generate a separate timeseries dataset which depicts the average constant and current GDP per capita (gdp_pc_k and gdp_pc_c) of Africa from 1960 to 2013. Export the table in excel format and name it “Africa_gdp_timeseries.xlsx” (or .csv)
+  
+  Africa_gdp_timeseries <- Africa_gdp %>% 
+    dplyr::group_by(year) %>% 
+    dplyr::summarise(gdp_pc_k = mean(gdp_pc_k, na.rm = TRUE),
+                     gdp_pc_c = mean(gdp_pc_c, na.rm = TRUE)) %>% 
+    dplyr::ungroup()
+  
+  # (7)(b) Export the table in publishable format as an excel file and name it “average_gdp.xlsx” (or “.csv”)
+  write.csv(Africa_gdp_timeseries, "Africa_gdp_timeseries.csv")
+  
+  
+  
+  # (8)(a) Generate a separate data set of the following variables average by country: i) GDP per capita (current), ii) GDPpercapita(constant), iii) Agriculture value (constant)
+    Africa_country_average <- Africa_merged %>% 
+      dplyr::group_by(Region, CountryName) %>% 
+      dplyr::summarise(gdp_pc_k   = mean(gdp_pc_k, na.rm = TRUE),
+                       gdp_pc_c   = mean(gdp_pc_c, na.rm = TRUE),
+                       Agri_Const = mean(Agri_Const, na.rm = TRUE)) %>% 
+      dplyr::ungroup()
+
+  # (8)(b) Save and export the dataset as “Africa_country_average.xlsx” (or .csv). Make sure to retain the region variable.
+  write.csv(Africa_country_average %>% 
+      dplyr::rename(Country                        = CountryName,
+                    "GDP per capita (current)"     = gdp_pc_k,
+                    "GDP per capita (constant)"    = gdp_pc_c,
+                    "Agriculture value (constant)" = Agri_Const), 
+      "Africa_country_average.csv")  
+
+```
+
+### 1.2 Data Exploration
+
+```{r}
+# 1. Using the Africa_gdp_timeseries dataset, generate line graph of average constant and current GDP per capita against time for Africa. On a particular year, the average GDP per capita seem to increase drastically. On what year does there seem to be a drastic increase? Indicate the year on the plot. Format your graphs so that they are publication quality and save them as .pdf files.
+
+Africa_gdp_ts <- Africa_gdp_timeseries %>% 
+  tidyr::pivot_longer(cols = c(gdp_pc_k, gdp_pc_c), names_to = "gdp_type", values_to = "GDP")
+
+# avg_ts_plot <- Africa_gdp_timeseries %>% 
+Africa_gdp_ts %>% 
+  ggplot(aes(x = year, y = GDP, colour = gdp_type)) + 
+  geom_line() + 
+  # facet_wrap(~gdp_type) + 
+  geom_text(aes(label = year), data = Africa_gdp_ts[which.max(Africa_gdp_ts$GDP),], hjust = 1.2, vjust = 0.5) +
+  # ggtext::geom_textbox(aes(label = paste0("<span style='font-size:32pt'><br>", Africa_gdp_timeseries[which.max(Africa_gdp_timeseries$GDP),], "<br></span>")), vjust = 0.45, fill = NA, box.colour = NA, family = "Cabin", size = 7, fontface = "bold") + 
+  scale_x_continuous(n.breaks = 10) + 
+  scale_y_continuous(n.breaks = 6) + 
+  labs(title = "GDP per Capita for Africa over time") + 
+  theme_classic()
+ 
+# avg_ts_plot
+ggsave("plot_01_avg_gdp_ts.pdf")
+
+# COMMENTS for improvement: 
+# there are better ways of doing the annotation one is given here, using ggpmisc
+# https://stackoverflow.com/questions/51697870/how-to-annotate-line-plot-with-arrow-and-maximum-value
+# Another solution is available using ggtext package 
+
+# 2. Using the Africa_country_average dataset, create side-by-side bar graphs of constant and current GDP per capita for all countries in the Middle East and North Africa Region. Format your graphs so that they are publication quality and save them as .pdf files.
+
+Africa_country_average %>% 
+  dplyr::filter(Region == "Middle East & North Africa") %>% 
+  dplyr::select(-Agri_Const, -Region ) %>% 
+  tidyr::pivot_longer(cols = c(gdp_pc_k, gdp_pc_c), names_to = "gdp_type", values_to = "GDP") %>% 
+  dplyr::mutate(gdp_type    = dplyr::if_else(gdp_type == "gdp_pc_c", "GDP Per Capita Current", "GDP Per Capita Constant")) %>% 
+  dplyr::arrange(GDP) %>% 
+  ggplot(aes(x = CountryName, y = GDP)) + 
+  geom_col() + 
+  facet_grid(~gdp_type) + 
+  coord_flip()
+
+# NOTES for improvement 
+# Ideally I would also arrange the plots by descending order of GDP in each plot.
+ggsave("plot_02_gdp_country.pdf")  
+
+# 3. Generate scatter plots for: i) GDP per capita (constant) on Poverty rate(1day) ii) GDP per capita(constant) on Employment ratio. Interpret these graphs and format them as a single pdf file.
+
+gdp_k_vs_pov_rate <- Africa_gdp %>% 
+  ggplot(aes(x = gdp_pc_k, y = pov_rate_1day)) + 
+  geom_point()
+
+gdp_k_vs_emp_ratio <- Africa_gdp %>% 
+  ggplot(aes(x = gdp_pc_k, y = emp_ratio)) + 
+  geom_point()  
+
+gdp_k_vs_pov_rate + gdp_k_vs_emp_ratio
+
+ggsave("plot_03_gdp_scatter.pdf")
+```
+
+
+### 1.3 Causal Inference
+
+```{r}
+
+```
+

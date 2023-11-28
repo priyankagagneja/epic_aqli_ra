@@ -1,0 +1,293 @@
+---
+title: "AQLI Test Packet - EPIC"
+subtitle: "2. Geospatial and Open-Source Section"
+author: "Priyanka Gagneja"
+date: "2023-11-24"
+output: word_document
+---
+
+## AQLI @ EPIC {.tabset}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(magrittr)
+library(ggplot2)
+library(ggtext)
+library(patchwork)
+library(sf)
+
+```
+
+```{r, load_data}
+gadm2_aqli_1998_2021 <- read.csv("Inputs/task2/gadm2_aqli_1998_2021.csv")
+```
+
+Lets look through the tasks and questions: 
+
+### 2.1 Basic wrangling 
+
+Q1. How many GADM2 regions are present in India?     
+
+```{r}
+
+GADM2_region_india_count <- gadm2_aqli_1998_2021 %>% 
+  dplyr::filter(country == "India") %>% 
+  dplyr::select(objectid_gadm2) %>% 
+  dplyr::distinct() %>% 
+  dplyr::count()
+
+```
+
+A1. There are `r GADM2_region_india_count$n` GADM2 regions are present in India.    
+
+Q2. Calculate population weighted pollution average of all years at country (GADM0) level.
+a. Save the country level file as a CSV.    
+
+```{r}
+# population weighted pollution average of all years at country (GADM0) level
+# Initial understanding of the ques
+# gadm2_aqli_1998_2021_wt_avg <- gadm2_aqli_1998_2021%>% 
+#   dplyr::select(-contains("llpp_")) %>% 
+#   dplyr::rowwise() %>%
+#   dplyr::mutate(avg_pm_all_yrs = mean(dplyr::c_across(pm1998:pm2021), na.rm = TRUE) ) %>% 
+#   dplyr::ungroup() %>% 
+#   dplyr::group_by(country) %>% 
+#   dplyr::mutate(total_pop = sum(population, na.rm = TRUE), 
+#                 wt_avg_pm = avg_pm_all_yrs*population/total_pop*100) %>% 
+#   dplyr::ungroup() %>% 
+#   dplyr::select(-contains("pm19"), -contains("pm20"))
+
+# NOTES for improvement
+# This section particularly runs slow. An alternate could be to use tidyr::pivot_longer(), before averaging
+
+
+# Revised calculation of the ques
+# Assumption: country , name_1, name_2 depicts the country, state, city hierarchy
+# gadm2_aqli_1998_2021_wt_avg <- gadm2_aqli_1998_2021%>%
+#   dplyr::select(-contains("llpp_"), -whostandard, -natstandard, -iso_alpha3) %>%
+#   dplyr::group_by(country) %>%
+#   dplyr::mutate(total_pop = sum(population, na.rm = TRUE),
+#                 wt        = population/total_pop*100) %>%
+#   dplyr::ungroup() %>% 
+#   dplyr::select(-population, -total_pop) %>%
+#   tidyr::pivot_longer(cols = c(contains("pm")), values_to = "pm_values", names_to = "year") %>% 
+#   dplyr::mutate(year   = sub("pm", "", year),
+#                 pm_wtd = wt*pm_values)
+
+# some data missingness experienced here for 7 countries. 1 came up due to presence of only 2 states and cities.
+#   country                              s
+#   <chr>                            <dbl>
+# 1 Akrotiri and Dhekelia              100
+# 2 Bouvet Island                        0
+# 3 British Indian Ocean Territory       0
+# 4 Clipperton Island                    0
+# 5 French Southern Territories          0
+# 6 Heard Island and McDonald Island     0
+# 7 South Georgia and the South Sand     0
+# 8 Svalbard and Jan Mayen               0
+
+# gadm2_aqli_country_pop_wt_avg <- gadm2_aqli_1998_2021%>% 
+#   dplyr::select(-contains("llpp_")) %>% 
+#   dplyr::group_by(country, year) %>% 
+#   dplyr::mutate(total_pop = sum(population, na.rm = TRUE), 
+#                 wt_avg_pm = avg_pm_all_yrs*population/total_pop*100) %>% 
+#   dplyr::ungroup() %>% 
+#   dplyr::select(-contains("pm19"), -contains("pm20"))
+#
+```
+
+
+```{r}
+# Final calculation of the ques
+# Assumption: country , name_1, name_2 depicts the country, state, city hierarchy
+gadm2_aqli_1998_2021_country_avg_pm <- gadm2_aqli_1998_2021 %>%
+  dplyr::group_by(country) %>%
+  dplyr::summarise(population = sum(population, na.rm = TRUE),
+                   across(contains("pm"), ~mean(., na.rm = T))) %>%
+  dplyr::ungroup() 
+# save the file
+write.csv(gadm2_aqli_1998_2021_country_avg_pm, "Outputs/task2/gadm2_aqli_1998_2021_country_avg_pm.csv") 
+```
+
+b. What are the 10 most polluted countries in 2021?     
+
+```{r}
+gadm2_aqli_1998_2021_country_avg_pm %>% 
+  dplyr::arrange(-pm2021) %>% 
+  dplyr::slice_head(n = 10) %>% 
+  gt::gt()
+```
+
+
+        
+Q3. What was the most polluted GADM2 region in the world in 1998, 2005 and 2021?     
+
+```{r}
+# Assuming Level 2 region in the question
+gadm2_aqli_1998_2021 %>% 
+  dplyr::select(country, name_1, name_2, population, pm1998, pm2005, pm2021) %>% # objectid_gadm2, 
+  reactable::reactable()
+```
+
+Most polluted cities or regions (with highest PM2.5 level concentrations).    
+The `reactable` table can be sorted by clicking on the appropriate columns     
+- 1998 - Unnao, UP, India     
+- 2005 - NCT of Delhi, India      
+- 2021 - NCT of Delhi, India       
+
+
+Q4. Plot a population weighted pollution average trendline plot for Uttar Pradesh from 1998 to 2021. Save this plot as a high-quality PNG file.     
+
+```{r}
+# slightly modified the plot for lack of clarity of ques on my part
+# gadm2_aqli_1998_2021_wt_avg %>% 
+#   dplyr::filter(name_1 == "Uttar Pradesh", name_2 == "Agra") %>% 
+#   ggplot(aes(x = year, y = pm_wtd)) +
+#   geom_line(group = 1)  + 
+#   # facet_wrap(~ name_2)
+#   labs(title = "Weighted PM levels over time") + 
+#   theme_light()
+
+gadm2_aqli_1998_2021 %>%
+  dplyr::group_by(country, name_1) %>%
+  dplyr::summarise(across(contains("pm"), ~mean(., na.rm = T))) %>%
+  dplyr::ungroup() %>% 
+  dplyr::filter(name_1 == "Uttar Pradesh") %>% #, name_2 == "Agra"
+  tidyr::pivot_longer(cols = c(contains("pm")), values_to = "pm_values", names_to = "year") %>% 
+  dplyr::mutate(year   = sub("pm", "", year)) %>% 
+  ggplot(aes(x = year, y = pm_values)) +
+  geom_line(group = 1)  + 
+  # facet_wrap(~ name_1) +
+  labs(title = "Polution levels over time - Uttar Pradesh", 
+       y     = "Avg PM2.5 concentration levels") + 
+  theme_light()
+
+ggsave("Outputs/task2/plot_04_aqli.png")
+```
+
+
+### 2.2 Geospatial 
+
+1. Plot a bar graph for the life years lost relative to the WHO guideline in the 10 most polluted countries in the world and plot them on a global country level map. For the map, the 10 most polluted country boundaries should be filled in with “dark red” and the rest of the map should be grayed out. Save both the bar graph and the map as high-quality PNG files.     
+
+```{r}
+top10_polluted_countries <- gadm2_aqli_1998_2021_country_avg_pm %>% 
+  dplyr::arrange(-pm2021) %>% 
+  dplyr::slice_head(n = 10) %>% 
+  dplyr::mutate(country = factor(country, levels = country))
+  
+gadm2_aqli_1998_2021_country_avg_llpp <- gadm2_aqli_1998_2021 %>% 
+  dplyr::group_by(country) %>% 
+  dplyr::summarise(llpp_who_2021 = mean(llpp_who_2021, na.rm = T) ) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(is_top_10 = dplyr::if_else(country %in% top10_polluted_countries$country, "1", "0"))
+
+gadm2_aqli_1998_2021_country_avg_llpp %>% 
+  dplyr::filter(country %in% top10_polluted_countries$country) %>% 
+  ggplot(aes(x = factor(country, levels = levels(top10_polluted_countries$country)), 
+             y = llpp_who_2021)) + 
+  geom_col(width = 0.7) + 
+  labs(title = "Life years lost relative to the WHO guideline",
+       subtitle = "Top 10 countries in the world", y = "", x = "") + 
+  coord_flip() +
+  theme_bw()
+```
+
+
+```{r}
+# library(tmap)
+#   map_obj + # tm_shape(gadm2_aqli_1998_2021_country) + 
+#   tm_polygons() + 
+#   tm_shape(urban_agglomerations) + 
+#   tm_symbols(size = "population_millions") +
+#   tm_facets(by = "year", nrow = 1, ncol = 1, free.coords = FALSE)
+
+
+# World map
+world <- map_data("world") %>%
+  fortify()
+
+# Fonts
+f1 <- "Outfit"
+f2 <- "SF Mono"
+
+cols <- c("0" = "grey", "1" = "red")
+
+llpp_map_df <- world %>% 
+    dplyr::left_join(gadm2_aqli_1998_2021_country_avg_llpp, by = c("region" = "country"))
+
+top5_labels <- top10_polluted_countries %>% 
+  dplyr::slice_head(n = 5) %>% 
+  dplyr::inner_join(llpp_map_df, by = c("country" = "region")) %>% 
+              dplyr::group_by(country) %>% 
+              dplyr::summarise(long = mean(long, na.rm = T),
+                               lat  = mean(lat , na.rm = T)) %>% 
+              dplyr::ungroup()
+
+top10_labels <- top10_polluted_countries %>% 
+  dplyr::inner_join(llpp_map_df, by = c("country" = "region")) %>% 
+              dplyr::group_by(country) %>% 
+              dplyr::summarise(long = mean(long, na.rm = T),
+                               lat  = mean(lat , na.rm = T)) %>% 
+              dplyr::ungroup()
+```
+
+
+```{r}
+llpp_map_df %>% 
+  ggplot() + # aes(fill = is_top_10)
+  geom_polygon(aes(long, lat, group = group, fill = is_top_10), color="grey88") + 
+  scale_fill_manual(values = cols, na.translate = FALSE) +
+  geom_text(data = top10_labels, nudge_x = 3, nudge_y = 3,
+            check_overlap = TRUE, 
+            aes(label = country, x = long, y = lat, group = country)) + 
+  coord_fixed(expand = FALSE) +
+  labs(title = "Map") +
+  theme_void() + #base_family = f1
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 11),
+    plot.background = element_rect(fill = "white", color = NA),
+    plot.title = element_text(face = "bold", size = 18),
+    plot.subtitle = element_text(size = 14)
+  )  
+
+```
+
+2. Create a potential gain in life expectancy (relative to the WHO guideline) map of eastern v/s western europe at GADM level 2 and save it as a high-quality PDF.
+a. Plot should be in AQLI “Potential gain in life expectancy” color scale. Visit AQLI website Index page > See legend for “Potential gain in life expectancy” and infer “exact” colors from that.
+b. You can define east and west europe based on any acceptable definition online, but whatever definition you use - mention the source.
+c. Feel free to add annotations/text boxes etc. to help explain the visualization.     
+
+```{r}
+## 
+```
+
+3. Look at the AQLI website > switch to Air pollution tab > plot a static version of the global pollution map you see there, in those “exact” same colors. Export it as a high quality (320 dpi) SVG file.      
+```{r}
+
+# sf_obj <- sf::st_read(dsn = "Inputs/task2/gadm2_aqli_shapefile/aqli_gadm2_final_june302023.shp", 
+#                       quiet = TRUE) %>% 
+#   dplyr::rename(objectid_gadm2 = obidgadm2) # country = name0, 
+# 
+# # gadm2_aqli_1998_2021
+# map_obj <- sf_obj %>% 
+#   dplyr::select(objectid_gadm2, geometry) %>% 
+#   dplyr::inner_join(gadm2_aqli_1998_2021, by = "objectid_gadm2") %>% 
+#   dplyr::select(country, name_1, name_2, pm2021, geometry)
+# 
+# map_obj %>% 
+#   ggplot() +
+#   geom_sf(data = map_obj, aes(fill = pm2021))
+
+```
+
+
+
+
+
+
